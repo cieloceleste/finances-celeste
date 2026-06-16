@@ -438,19 +438,6 @@ var SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJl
 var supabase = window.supabase ? window.supabase.createClient(SB_URL, SB_ANON) : null;
 var currentUser = null;
 
-function getAuthHeaders(){
-  // Obtener token fresco de la sesion activa de Supabase
-  var token = SB_ANON;
-  try {
-    var raw = localStorage.getItem('sb-izgbxruyfhbtlbohaatq-auth-token');
-    if(raw){
-      var parsed = JSON.parse(raw);
-      if(parsed && parsed.access_token) token = parsed.access_token;
-    }
-  } catch(e){}
-  return {'Content-Type':'application/json','apikey':SB_ANON,'Authorization':'Bearer '+token};
-}
-
 // LOGIN CON GOOGLE
 function loginGoogle(){
   if(!supabase){ alert('Error: Supabase no disponible'); return; }
@@ -490,67 +477,63 @@ function initApp(user){
   });
 }
 
-// GUARDAR — datos propios del usuario
+// GUARDAR usando el cliente Supabase directamente (maneja el token automáticamente)
 function saveData(){
-  if(!currentUser){ alert('Debes iniciar sesion primero'); return; }
-  var uid = currentUser.id;
+  if(!currentUser || !supabase){ 
+    localStorage.setItem('finanzas2026_v2', JSON.stringify(state));
+    isDirty = false;
+    return; 
+  }
   localStorage.setItem('finanzas2026_v2', JSON.stringify(state));
   $('saveIndicator').textContent = 'Guardando...';
   $('saveIndicator').className = 'save-indicator';
-  // Intentar UPDATE primero, si no existe INSERT
-  fetch(SB_URL + '/rest/v1/finanzas?user_id=eq.'+uid, {
-    method: 'PATCH',
-    headers: Object.assign({}, getAuthHeaders(), {'Prefer':'return=minimal,count=exact'}),
-    body: JSON.stringify({data: state, updated_at: new Date().toISOString()})
-  }).then(function(r){
-    var count = r.headers.get('content-range');
-    if(count === '*/0'){
-      // No existe, hacer INSERT
-      return fetch(SB_URL + '/rest/v1/finanzas', {
-        method: 'POST',
-        headers: Object.assign({}, getAuthHeaders(), {'Prefer':'return=minimal'}),
-        body: JSON.stringify({user_id: uid, data: state, updated_at: new Date().toISOString()})
-      });
-    }
-    return r;
-  }).then(function(r){
-    if(r && r.ok){
-      isDirty = false;
-      $('saveIndicator').textContent = 'Guardado en la nube';
-      $('saveIndicator').className = 'save-indicator saved';
-      setTimeout(function(){ if(!isDirty){ $('saveIndicator').textContent='Sin cambios'; $('saveIndicator').className='save-indicator'; } }, 2500);
-    } else {
-      $('saveIndicator').textContent = 'Error al guardar';
-    }
-  }).catch(function(){
-    isDirty = false;
-    $('saveIndicator').textContent = 'Sin conexion - guardado local';
-    $('saveIndicator').className = 'save-indicator';
-  });
+  
+  var payload = {user_id: currentUser.id, data: state, updated_at: new Date().toISOString()};
+  
+  supabase.from('finanzas')
+    .upsert(payload, {onConflict: 'user_id'})
+    .then(function(result){
+      if(result.error){
+        console.error('Error guardando:', result.error);
+        $('saveIndicator').textContent = 'Error: ' + result.error.message;
+      } else {
+        isDirty = false;
+        $('saveIndicator').textContent = 'Guardado en la nube';
+        $('saveIndicator').className = 'save-indicator saved';
+        setTimeout(function(){ 
+          if(!isDirty){ 
+            $('saveIndicator').textContent='Sin cambios'; 
+            $('saveIndicator').className='save-indicator'; 
+          } 
+        }, 2500);
+      }
+    });
 }
 
-// CARGAR — datos propios del usuario
+// CARGAR usando el cliente Supabase directamente
 function loadFromSupabase(callback){
-  if(!currentUser){ callback(); return; }
-  var uid = currentUser.id;
+  if(!currentUser || !supabase){ callback(); return; }
   $('saveIndicator').textContent = 'Cargando...';
-  fetch(SB_URL + '/rest/v1/finanzas?user_id=eq.'+uid+'&select=data,updated_at', {
-    headers: getAuthHeaders()
-  }).then(function(r){ return r.json(); })
-  .then(function(rows){
-    if(rows && rows.length > 0 && rows[0].data && Object.keys(rows[0].data).length > 0){
-      var migrated = migrateState(JSON.parse(JSON.stringify(rows[0].data)));
-      if(migrated){
-        state = migrated;
-        localStorage.setItem('finanzas2026_v2', JSON.stringify(state));
+  
+  supabase.from('finanzas')
+    .select('data, updated_at')
+    .eq('user_id', currentUser.id)
+    .single()
+    .then(function(result){
+      if(result.data && result.data.data && Object.keys(result.data.data).length > 0){
+        var migrated = migrateState(JSON.parse(JSON.stringify(result.data.data)));
+        if(migrated){
+          state = migrated;
+          localStorage.setItem('finanzas2026_v2', JSON.stringify(state));
+        }
       }
-    }
-    $('saveIndicator').textContent = 'Sin cambios';
-    callback();
-  }).catch(function(){
-    $('saveIndicator').textContent = 'Sin conexion - datos locales';
-    callback();
-  });
+      $('saveIndicator').textContent = 'Sin cambios';
+      callback();
+    }).catch(function(e){
+      console.log('Sin datos en nube, usando local');
+      $('saveIndicator').textContent = 'Sin cambios';
+      callback();
+    });
 }
 function exportJSON(){
   var b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
