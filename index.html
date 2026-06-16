@@ -439,7 +439,15 @@ var supabase = window.supabase ? window.supabase.createClient(SB_URL, SB_ANON) :
 var currentUser = null;
 
 function getAuthHeaders(){
-  var token = currentUser ? currentUser.access_token : SB_ANON;
+  // Obtener token fresco de la sesion activa de Supabase
+  var token = SB_ANON;
+  try {
+    var raw = localStorage.getItem('sb-izgbxruyfhbtlbohaatq-auth-token');
+    if(raw){
+      var parsed = JSON.parse(raw);
+      if(parsed && parsed.access_token) token = parsed.access_token;
+    }
+  } catch(e){}
   return {'Content-Type':'application/json','apikey':SB_ANON,'Authorization':'Bearer '+token};
 }
 
