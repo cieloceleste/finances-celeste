@@ -1282,20 +1282,19 @@ function renderAnual(){
 
 // --- INIT ---
 applyTheme();
-// Manejar sesion de Supabase
+
 if(supabase){
+  // onAuthStateChange maneja TODOS los casos:
+  // - sesion existente al recargar
+  // - redirect de vuelta desde Google (SIGNED_IN event)
+  // - logout
   supabase.auth.onAuthStateChange(function(event, session){
-    if(session && session.user){
+    if((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session && session.user){
       initApp(session.user);
-    } else {
+    } else if(event === 'SIGNED_OUT' || (!session && event === 'INITIAL_SESSION')){
+      currentUser = null;
       document.getElementById('loginScreen').style.display = 'flex';
       document.getElementById('mainApp').style.display = 'none';
-    }
-  });
-  // Verificar sesion existente al cargar
-  supabase.auth.getSession().then(function(result){
-    if(result.data && result.data.session){
-      initApp(result.data.session.user);
     }
   });
 } else {
